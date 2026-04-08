@@ -76,6 +76,8 @@ npm run db:migrate
 
 Vercel runs `prisma generate` during install via `postinstall`.
 
+The second migration removes legacy lower-case tables from the old web prototype schema. It does not touch Supabase `auth` or `storage` schemas.
+
 ## Local Development
 
 ```powershell
