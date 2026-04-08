@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  CANCELED_UNTIL_EXPIRY
+  EXPIRED
+  GRACE_PERIOD
+  ON_HOLD
+  PAUSED
+  PENDING
+  PRODUCT_MISMATCH
+  UNKNOWN
+}
+
+enum JobStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DEFERRED
+}
+
+enum JobPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  googleSubject String?  @unique
+  fullName      String?
+  pictureUrl    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  profile       Profile?
+  vehicles      Vehicle[]
+  reminders     Reminder[]
+  subscriptions SubscriptionEntitlement[]
+  documents     Document[]
+}
+
+model Profile {
+  id        String           @id @default(uuid())
+  userId    String           @unique
+  tier      SubscriptionTier @default(FREE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Vehicle {
+  id                      String    @id @default(uuid())
+  userId                  String
+  registration            String
+  make                    String
+  model                   String?
+  colour                  String?
+  yearOfManufacture       Int?
+  fuelType                String?
+  engineCapacity          Int?
+  co2Emissions            Int?
+  taxStatus               String?
+  taxDueDate              DateTime?
+  motStatus               String?
+  motExpiryDate           DateTime?
+  dateOfFirstRegistration DateTime?
+  currentMileage          Int?
+  imageUrl                String?
+  isActive                Boolean   @default(true)
+  dvlaLastRefreshedAt     DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs                    Job[]
+  reminders               Reminder[]
+  mileageLogs             MileageLog[]
+  insurancePolicies       InsurancePolicy[]
+  serviceRecords          ServiceRecord[]
+  documents               Document[]
+
+  @@unique([userId, registration])
+  @@index([userId])
+  @@index([registration])
+}
+
+model Job {
+  id              String      @id @default(uuid())
+  userId          String
+  vehicleId       String
+  title           String
+  description     String?
+  category        String
+  priority        JobPriority @default(MEDIUM)
+  status          JobStatus   @default(PENDING)
+  source          String      @default("manual")
+  motAdvisoryText String?
+  dueDate         DateTime?
+  estimatedCost   Decimal?
+  actualCost      Decimal?
+  completedAt     DateTime?
+  completionNotes String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  vehicle         Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([vehicleId])
+  @@index([status])
+}
+
+model Reminder {
+  id                 String    @id @default(uuid())
+  userId             String
+  vehicleId          String?
+  reminderType       String
+  title              String
+  description        String?
+  dueDate            DateTime
+  remindDaysBefore   Int       @default(14)
+  isRecurring        Boolean   @default(false)
+  recurrenceInterval String?
+  isCompleted        Boolean   @default(false)
+  completedAt        DateTime?
+  notificationSent   Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle            Vehicle?  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([vehicleId])
+  @@index([dueDate])
+}
+
+model MileageLog {
+  id         String   @id @default(uuid())
+  vehicleId  String
+  userId     String
+  mileage    Int
+  recordedAt DateTime @default(now())
+  notes      String?
+  source     String   @default("manual")
+  createdAt  DateTime @default(now())
+
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([vehicleId])
+}
+
+model SubscriptionEntitlement {
+  id                 String             @id @default(uuid())
+  userId             String
+  tier               SubscriptionTier   @default(PRO)
+  status             SubscriptionStatus @default(PENDING)
+  provider           String             @default("google_play")
+  productId          String
+  purchaseTokenHash  String             @unique
+  packageName        String?
+  expiryTime         DateTime?
+  autoRenewing       Boolean?
+  rawProviderPayload Json?
+  lastVerifiedAt     DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model InsurancePolicy {
+  id           String   @id @default(uuid())
+  vehicleId    String
+  userId       String
+  provider     String
+  renewalDate  DateTime
+  policyNumber String?
+  notes        String?
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  vehicle      Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([vehicleId])
+  @@index([renewalDate])
+}
+
+model ServiceRecord {
+  id          String   @id @default(uuid())
+  vehicleId   String
+  userId      String
+  recordDate  DateTime
+  title       String
+  description String?
+  mileage     Int?
+  cost        Decimal?
+  provider    String?
+  recordType  String   @default("service")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([vehicleId])
+  @@index([recordDate])
+}
+
+model Document {
+  id           String   @id @default(uuid())
+  userId       String
+  vehicleId    String
+  documentType String   @default("other")
+  title        String
+  fileName     String
+  filePath     String
+  fileSize     Int?
+  mimeType     String?
+  expiryDate   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle      Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([vehicleId])
+}

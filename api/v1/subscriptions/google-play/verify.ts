@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getGooglePlayPackageName, getGooglePlaySubscriptionProductId, verifyGooglePlaySubscription } from '../../../_lib/googlePlay.js';
-import { createSessionToken, getBearerSession, sendAuthError, sessionToUser } from '../../../_lib/session.js';
+import { getRequestUser } from '../../../_lib/authUser.js';
+import { prisma } from '../../../_lib/prisma.js';
+import { createSessionToken, sessionToUser } from '../../../_lib/session.js';
 
 function getBody(request: VercelRequest) {
   if (typeof request.body === 'string') return JSON.parse(request.body) as Record<string, unknown>;
@@ -8,9 +10,10 @@ function getBody(request: VercelRequest) {
 }
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
-  try {
-    const session = getBearerSession(request);
+  const context = await getRequestUser(request, response);
+  if (!context) return;
 
+  try {
     if (request.method !== 'POST') {
       response.setHeader('Allow', 'POST');
       response.status(405).json({ error: 'Method not allowed' });
@@ -38,11 +41,43 @@ export default async function handler(request: VercelRequest, response: VercelRe
     }
 
     const entitlement = await verifyGooglePlaySubscription({ packageName, productId, purchaseToken });
+    await prisma.subscriptionEntitlement.upsert({
+      where: { purchaseTokenHash: entitlement.purchaseTokenHash },
+      update: {
+        userId: context.user.id,
+        tier: entitlement.tier,
+        status: entitlement.status,
+        productId: entitlement.productId,
+        packageName,
+        expiryTime: entitlement.expiresAt ? new Date(entitlement.expiresAt) : null,
+        autoRenewing: entitlement.autoRenewing,
+        rawProviderPayload: entitlement.raw,
+        lastVerifiedAt: new Date(),
+      },
+      create: {
+        userId: context.user.id,
+        tier: entitlement.tier,
+        status: entitlement.status,
+        productId: entitlement.productId,
+        purchaseTokenHash: entitlement.purchaseTokenHash,
+        packageName,
+        expiryTime: entitlement.expiresAt ? new Date(entitlement.expiresAt) : null,
+        autoRenewing: entitlement.autoRenewing,
+        rawProviderPayload: entitlement.raw,
+        lastVerifiedAt: new Date(),
+      },
+    });
+    await prisma.profile.upsert({
+      where: { userId: context.user.id },
+      update: { tier: entitlement.tier },
+      create: { userId: context.user.id, tier: entitlement.tier },
+    });
+
     const nextSession = {
-      sub: session.sub,
-      email: session.email,
-      name: session.name ?? null,
-      picture: session.picture ?? null,
+      sub: context.user.id,
+      email: context.user.email,
+      name: context.user.fullName ?? null,
+      picture: context.user.pictureUrl ?? null,
       tier: entitlement.tier,
       subscriptionProductId: entitlement.productId,
       subscriptionStatus: entitlement.status,
@@ -68,19 +103,6 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : '';
-    if (
-      [
-        'Missing bearer token.',
-        'Malformed session token.',
-        'Invalid session token signature.',
-        'Session token has expired.',
-      ].includes(message)
-    ) {
-      sendAuthError(response);
-      return;
-    }
-
     console.error('Google Play verification failed', {
       message: error instanceof Error ? error.message : 'Unknown Google Play verification error',
     });

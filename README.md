@@ -1,6 +1,6 @@
 # Vroova API
 
-Minimal Vercel serverless API for the Vroova Android app.
+Vercel serverless API for the Vroova Android app.
 
 ## Routes
 
@@ -8,6 +8,27 @@ Minimal Vercel serverless API for the Vroova Android app.
 - `GET /v1/health`
 - `POST /v1/auth`
 - `GET /v1/user`
+- `POST /v1/auth/google`
+- `GET /v1/me`
+- `DELETE /v1/me`
+- `GET /v1/vehicles`
+- `POST /v1/vehicles`
+- `POST /v1/vehicles/lookup`
+- `GET /v1/vehicles/:id`
+- `POST /v1/vehicles/:id/refresh`
+- `GET /v1/vehicles/:id/mot-history`
+- `POST /v1/vehicles/:id/mot-advisories/jobs`
+- `POST /v1/jobs`
+- `PATCH /v1/jobs/:id`
+- `DELETE /v1/jobs/:id`
+- `POST /v1/reminders`
+- `PATCH /v1/reminders/:id`
+- `DELETE /v1/reminders/:id`
+- `POST /v1/mileage`
+- `POST /v1/insurance`
+- `POST /v1/records`
+- `POST /v1/subscriptions/google-play/verify`
+- `POST /v1/subscriptions/google-play/refresh`
 
 ## Required Environment Variables
 
@@ -20,6 +41,12 @@ GOOGLE_PLAY_PACKAGE_NAME
 GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID
 VROOVA_JWT_SECRET
 DVLA_API_KEY
+DVSA_CLIENT_ID
+DVSA_CLIENT_SECRET
+DVSA_API_KEY
+DVSA_SCOPE_URL
+DVSA_TOKEN_URL
+DATABASE_URL
 ```
 
 Do not store real secrets in this repository.
@@ -29,6 +56,14 @@ Do not store real secrets in this repository.
 `GOOGLE_PLAY_PACKAGE_NAME` should be `com.vroovamobile`.
 
 `GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID` should be `vroova_pro_monthly`.
+
+`DATABASE_URL` must point to a production PostgreSQL database. Run the Prisma migration before relying on garage/jobs/reminders routes:
+
+```powershell
+npm run db:migrate
+```
+
+Vercel runs `prisma generate` during install via `postinstall`.
 
 ## Local Development
 

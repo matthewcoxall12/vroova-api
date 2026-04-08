@@ -44,6 +44,7 @@ export type GooglePlayEntitlement = {
   needsAcknowledgement: boolean;
   isTestPurchase: boolean;
   purchaseTokenHash: string;
+  raw: SubscriptionPurchaseV2;
 };
 
 const androidPublisherScope = 'https://www.googleapis.com/auth/androidpublisher';
@@ -122,6 +123,7 @@ export async function verifyGooglePlaySubscription({
       needsAcknowledgement: data.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
       isTestPurchase: Boolean(data.testPurchase),
       purchaseTokenHash: purchaseTokenHash(purchaseToken),
+      raw: data,
     };
   }
 
@@ -140,5 +142,6 @@ export async function verifyGooglePlaySubscription({
     needsAcknowledgement: data.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
     isTestPurchase: Boolean(data.testPurchase),
     purchaseTokenHash: purchaseTokenHash(purchaseToken),
+    raw: data,
   };
 }

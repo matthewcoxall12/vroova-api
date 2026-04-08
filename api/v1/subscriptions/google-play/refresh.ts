@@ -1,45 +1,59 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createSessionToken, getBearerSession, sendAuthError, sessionToUser } from '../../../_lib/session.js';
+import { getRequestUser, userPayload } from '../../../_lib/authUser.js';
+import { prisma } from '../../../_lib/prisma.js';
+import { createSessionToken } from '../../../_lib/session.js';
 
-export default function handler(request: VercelRequest, response: VercelResponse) {
-  try {
-    const session = getBearerSession(request);
+export default async function handler(request: VercelRequest, response: VercelResponse) {
+  const context = await getRequestUser(request, response);
+  if (!context) return;
 
-    if (request.method !== 'POST') {
-      response.setHeader('Allow', 'POST');
-      response.status(405).json({ error: 'Method not allowed' });
-      return;
-    }
-
-    const expiresAt = session.subscriptionExpiresAt ?? null;
-    const isExpired = expiresAt ? new Date(expiresAt).getTime() <= Date.now() : false;
-    const tier: 'FREE' | 'PRO' = session.tier === 'PRO' && !isExpired ? 'PRO' : 'FREE';
-    const status = tier === 'PRO' ? session.subscriptionStatus ?? 'ACTIVE' : isExpired ? 'EXPIRED' : 'FREE';
-    const nextSession = {
-      sub: session.sub,
-      email: session.email,
-      name: session.name ?? null,
-      picture: session.picture ?? null,
-      tier,
-      subscriptionProductId: tier === 'PRO' ? session.subscriptionProductId ?? null : null,
-      subscriptionStatus: status,
-      subscriptionExpiresAt: tier === 'PRO' ? expiresAt : null,
-    };
-
-    response.status(200).json({
-      success: tier === 'PRO',
-      tier,
-      status,
-      productId: nextSession.subscriptionProductId,
-      expiresAt: nextSession.subscriptionExpiresAt,
-      token: createSessionToken(nextSession),
-      user: sessionToUser({
-        ...nextSession,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
-      }),
-    });
-  } catch {
-    sendAuthError(response);
+  if (request.method !== 'POST') {
+    response.setHeader('Allow', 'POST');
+    response.status(405).json({ error: 'Method not allowed' });
+    return;
   }
+
+  const entitlement = await prisma.subscriptionEntitlement.findFirst({
+    where: { userId: context.user.id },
+    orderBy: { updatedAt: 'desc' },
+  });
+  const expiresAt = entitlement?.expiryTime?.toISOString() ?? null;
+  const isActive = entitlement?.status === 'ACTIVE' && (!entitlement.expiryTime || entitlement.expiryTime.getTime() > Date.now());
+  const tier: 'FREE' | 'PRO' = isActive ? 'PRO' : 'FREE';
+  if ((context.user.profile?.tier ?? 'FREE') !== tier) {
+    await prisma.profile.upsert({
+      where: { userId: context.user.id },
+      update: { tier },
+      create: { userId: context.user.id, tier },
+    });
+  }
+
+  const nextSession = {
+    sub: context.user.id,
+    email: context.user.email,
+    name: context.user.fullName ?? null,
+    picture: context.user.pictureUrl ?? null,
+    tier,
+    subscriptionProductId: isActive ? entitlement?.productId ?? null : null,
+    subscriptionStatus: entitlement?.status ?? (tier === 'PRO' ? 'ACTIVE' : 'FREE'),
+    subscriptionExpiresAt: isActive ? expiresAt : null,
+  };
+
+  const refreshedUser = {
+    ...userPayload(context.user),
+    tier,
+    subscriptionProductId: nextSession.subscriptionProductId,
+    subscriptionStatus: nextSession.subscriptionStatus,
+    subscriptionExpiresAt: nextSession.subscriptionExpiresAt,
+  };
+
+  response.status(200).json({
+    success: tier === 'PRO',
+    tier,
+    status: nextSession.subscriptionStatus,
+    productId: nextSession.subscriptionProductId,
+    expiresAt: nextSession.subscriptionExpiresAt,
+    token: createSessionToken(nextSession),
+    user: refreshedUser,
+  });
 }

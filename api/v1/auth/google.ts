@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { OAuth2Client } from 'google-auth-library';
 import { createSessionToken, sessionToUser } from '../../_lib/session.js';
+import { prisma } from '../../_lib/prisma.js';
 
 function getBody(request: VercelRequest) {
   if (typeof request.body === 'string') return JSON.parse(request.body) as Record<string, unknown>;
@@ -44,12 +45,34 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return;
     }
 
+    const user = await prisma.user.upsert({
+      where: { googleSubject: payload.sub },
+      update: {
+        email: payload.email,
+        fullName: payload.name ?? null,
+        pictureUrl: payload.picture ?? null,
+      },
+      create: {
+        id: `google:${payload.sub}`,
+        googleSubject: payload.sub,
+        email: payload.email,
+        fullName: payload.name ?? null,
+        pictureUrl: payload.picture ?? null,
+        profile: { create: { tier: 'FREE' } },
+      },
+      include: { profile: true },
+    });
+
+    if (!user.profile) {
+      await prisma.profile.create({ data: { userId: user.id, tier: 'FREE' } });
+    }
+
     const session = {
-      sub: `google:${payload.sub}`,
-      email: payload.email,
-      name: payload.name ?? null,
-      picture: payload.picture ?? null,
-      tier: 'FREE' as const,
+      sub: user.id,
+      email: user.email,
+      name: user.fullName ?? null,
+      picture: user.pictureUrl ?? null,
+      tier: user.profile?.tier ?? ('FREE' as const),
     };
     const token = createSessionToken(session);
 

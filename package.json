@@ -5,14 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@vercel/node": "^5.3.24",
+    "prisma": "^6.19.0",
     "typescript": "^5.9.3",
     "vercel": "^48.6.0"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.0",
     "google-auth-library": "^10.6.2"
   }
 }
