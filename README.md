@@ -62,7 +62,13 @@ Do not store real secrets in this repository.
 
 `DIRECT_URL` should point to the direct Supabase PostgreSQL connection used by Prisma migrations.
 
-Run the Prisma migration before relying on garage/jobs/reminders routes:
+The Vercel build runs the migration automatically:
+
+```text
+npm run db:migrate && npm run typecheck
+```
+
+If you need to run the migration manually from a shell that already has the Vercel/Supabase env vars available:
 
 ```powershell
 npm run db:migrate
