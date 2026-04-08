@@ -7,6 +7,9 @@ export type VroovaSession = {
   name?: string | null;
   picture?: string | null;
   tier: 'FREE' | 'PRO';
+  subscriptionProductId?: string | null;
+  subscriptionStatus?: string | null;
+  subscriptionExpiresAt?: string | null;
   iat: number;
   exp: number;
 };
@@ -17,6 +20,9 @@ export type VroovaUser = {
   fullName?: string | null;
   pictureUrl?: string | null;
   tier: 'FREE' | 'PRO';
+  subscriptionProductId?: string | null;
+  subscriptionStatus?: string | null;
+  subscriptionExpiresAt?: string | null;
 };
 
 const tokenTtlSeconds = 60 * 60 * 24 * 30;
@@ -78,6 +84,9 @@ export function sessionToUser(session: VroovaSession): VroovaUser {
     fullName: session.name ?? null,
     pictureUrl: session.picture ?? null,
     tier: session.tier,
+    subscriptionProductId: session.subscriptionProductId ?? null,
+    subscriptionStatus: session.subscriptionStatus ?? null,
+    subscriptionExpiresAt: session.subscriptionExpiresAt ?? null,
   };
 }
 
