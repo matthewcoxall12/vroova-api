@@ -24,14 +24,29 @@ export type MotTest = {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+function getEnv(...names: string[]) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value) return value;
+  }
+  return undefined;
+}
+
 async function getAccessToken() {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 300_000) return cachedToken.token;
 
-  const clientId = process.env.DVSA_CLIENT_ID;
-  const clientSecret = process.env.DVSA_CLIENT_SECRET;
-  const tokenUrl = process.env.DVSA_TOKEN_URL;
-  const scope = process.env.DVSA_SCOPE_URL ?? 'https://tapi.dvsa.gov.uk/.default';
-  if (!clientId || !clientSecret || !tokenUrl) throw new Error('DVSA OAuth credentials are not configured.');
+  const clientId = getEnv('DVSA_CLIENT_ID', 'DVSA_OAUTH_CLIENT_ID');
+  const clientSecret = getEnv('DVSA_CLIENT_SECRET', 'DVSA_CLIENTSECRET', 'DVSA_OAUTH_CLIENT_SECRET');
+  const tokenUrl = getEnv('DVSA_TOKEN_URL', 'DVSA_OAUTH_TOKEN_URL');
+  const scope = getEnv('DVSA_SCOPE_URL', 'DVSA_OAUTH_SCOPE_URL') ?? 'https://tapi.dvsa.gov.uk/.default';
+  if (!clientId || !clientSecret || !tokenUrl) {
+    const missing = [
+      !clientId ? 'DVSA_CLIENT_ID' : null,
+      !clientSecret ? 'DVSA_CLIENT_SECRET' : null,
+      !tokenUrl ? 'DVSA_TOKEN_URL' : null,
+    ].filter(Boolean);
+    throw new Error(`DVSA OAuth credentials are not configured. Missing: ${missing.join(', ')}.`);
+  }
 
   const response = await fetch(tokenUrl, {
     method: 'POST',
@@ -55,7 +70,7 @@ async function getAccessToken() {
 }
 
 export async function fetchMotHistory(registration: string) {
-  const apiKey = process.env.DVSA_API_KEY;
+  const apiKey = getEnv('DVSA_API_KEY', 'DVSA_MOT_API_KEY');
   if (!apiKey) throw new Error('DVSA_API_KEY is not configured.');
 
   const token = await getAccessToken();
