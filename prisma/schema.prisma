@@ -45,6 +45,8 @@ model User {
   id            String   @id @default(uuid())
   email         String   @unique
   googleSubject String?  @unique
+  passwordHash  String?
+  passwordSalt  String?
   fullName      String?
   pictureUrl    String?
   createdAt     DateTime @default(now())

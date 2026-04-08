@@ -1,3 +1,4 @@
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { OAuth2Client } from 'google-auth-library';
 import { Prisma } from '@prisma/client';
@@ -38,6 +39,37 @@ function validStatus(value: unknown) {
     : null;
 }
 
+function normaliseEmail(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function hashPassword(password: string, salt = randomBytes(16).toString('base64url')) {
+  const hash = pbkdf2Sync(password, salt, 210_000, 32, 'sha256').toString('base64url');
+  return { salt, hash };
+}
+
+function passwordMatches(password: string, salt: string, expectedHash: string) {
+  const { hash } = hashPassword(password, salt);
+  const actual = new Uint8Array(Buffer.from(hash));
+  const expected = new Uint8Array(Buffer.from(expectedHash));
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function authResponseForUser(user: { id: string; email: string; fullName: string | null; pictureUrl: string | null; profile: { tier: 'FREE' | 'PRO' } | null }) {
+  const session = {
+    sub: user.id,
+    email: user.email,
+    name: user.fullName ?? null,
+    picture: user.pictureUrl ?? null,
+    tier: user.profile?.tier ?? ('FREE' as const),
+  };
+
+  return {
+    token: createSessionToken(session),
+    user: sessionToUser({ ...session, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30 }),
+  };
+}
+
 async function handleGoogleAuth(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
 
@@ -71,21 +103,52 @@ async function handleGoogleAuth(request: VercelRequest, response: VercelResponse
     });
     if (!user.profile) await prisma.profile.create({ data: { userId: user.id, tier: 'FREE' } });
 
-    const session = {
-      sub: user.id,
-      email: user.email,
-      name: user.fullName ?? null,
-      picture: user.pictureUrl ?? null,
-      tier: user.profile?.tier ?? ('FREE' as const),
-    };
-
-    response.status(200).json({
-      token: createSessionToken(session),
-      user: sessionToUser({ ...session, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30 }),
-    });
+    response.status(200).json(authResponseForUser(user));
   } catch (error) {
     console.error('Google auth failed', { message: error instanceof Error ? error.message : 'Unknown auth error' });
     sendError(response, 401, 'Google sign-in failed.');
+  }
+}
+
+async function handleEmailAuth(request: VercelRequest, response: VercelResponse) {
+  if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
+
+  try {
+    const body = readJsonBody(request);
+    const mode = body.mode === 'register' ? 'register' : 'login';
+    const email = normaliseEmail(body.email);
+    const password = typeof body.password === 'string' ? body.password : '';
+    const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+
+    if (!email || !email.includes('@')) return sendError(response, 400, 'Enter a valid email address.');
+    if (password.length < 8) return sendError(response, 400, 'Password must be at least 8 characters.');
+
+    const existing = await prisma.user.findUnique({ where: { email }, include: { profile: true } });
+
+    if (mode === 'register') {
+      if (existing?.passwordHash) return sendError(response, 409, 'An account already exists for this email.');
+      if (existing && !existing.passwordHash) return sendError(response, 409, 'This email is already linked to Google sign-in.');
+
+      const { salt, hash } = hashPassword(password);
+      const user = await prisma.user.create({
+        data: {
+          email,
+          fullName: fullName || null,
+          passwordSalt: salt,
+          passwordHash: hash,
+          profile: { create: { tier: 'FREE' } },
+        },
+        include: { profile: true },
+      });
+      return response.status(200).json(authResponseForUser(user));
+    }
+
+    if (!existing?.passwordHash || !existing.passwordSalt) return sendError(response, 401, 'Email or password is incorrect.');
+    if (!passwordMatches(password, existing.passwordSalt, existing.passwordHash)) return sendError(response, 401, 'Email or password is incorrect.');
+    return response.status(200).json(authResponseForUser(existing));
+  } catch (error) {
+    console.error('Email auth failed', { message: error instanceof Error ? error.message : 'Unknown auth error' });
+    return sendError(response, 500, 'Email sign-in failed.');
   }
 }
 
@@ -529,6 +592,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   if (key === '/user') return response.status(200).json({ id: 'test-user', email: 'test@vroova.com' });
   if (key === '/auth') return request.method === 'POST' ? response.status(200).json({ success: true }) : sendMethodNotAllowed(response, ['POST']);
   if (key === '/auth/google') return handleGoogleAuth(request, response);
+  if (key === '/auth/email') return handleEmailAuth(request, response);
   if (key === '/public/vehicle-check') return handlePublicVehicleCheck(request, response);
   if (key === '/me') return handleMe(request, response);
   if (parts[0] === 'vehicles') return handleVehicles(request, response, parts);
