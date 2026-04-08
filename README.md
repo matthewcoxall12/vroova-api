@@ -47,6 +47,7 @@ DVSA_API_KEY
 DVSA_SCOPE_URL
 DVSA_TOKEN_URL
 DATABASE_URL
+DIRECT_URL
 ```
 
 Do not store real secrets in this repository.
@@ -57,7 +58,11 @@ Do not store real secrets in this repository.
 
 `GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID` should be `vroova_pro_monthly`.
 
-`DATABASE_URL` must point to a production PostgreSQL database. Run the Prisma migration before relying on garage/jobs/reminders routes:
+`DATABASE_URL` must point to the production PostgreSQL connection used by the app at runtime.
+
+`DIRECT_URL` should point to the direct Supabase PostgreSQL connection used by Prisma migrations.
+
+Run the Prisma migration before relying on garage/jobs/reminders routes:
 
 ```powershell
 npm run db:migrate
