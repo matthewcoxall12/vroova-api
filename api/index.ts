@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { OAuth2Client } from 'google-auth-library';
 import { Prisma } from '@prisma/client';
-import { getRequestUser, userPayload } from '../_lib/authUser.js';
-import { lookupDvlaVehicle } from '../_lib/dvla.js';
-import { fetchMotHistory } from '../_lib/dvsa.js';
-import { getGooglePlayPackageName, getGooglePlaySubscriptionProductId, verifyGooglePlaySubscription } from '../_lib/googlePlay.js';
+import { getRequestUser, userPayload } from './_lib/authUser.js';
+import { lookupDvlaVehicle } from './_lib/dvla.js';
+import { fetchMotHistory } from './_lib/dvsa.js';
+import { getGooglePlayPackageName, getGooglePlaySubscriptionProductId, verifyGooglePlaySubscription } from './_lib/googlePlay.js';
 import {
   getOptionalNumber,
   getOptionalString,
@@ -13,14 +13,15 @@ import {
   readJsonBody,
   sendError,
   sendMethodNotAllowed,
-} from '../_lib/http.js';
-import { prisma } from '../_lib/prisma.js';
-import { createSessionToken, sessionToUser } from '../_lib/session.js';
-import { categorizeAdvisory, priorityFromAdvisoryType, serializeVehicle, vehicleInclude } from '../_lib/vehicles.js';
+} from './_lib/http.js';
+import { prisma } from './_lib/prisma.js';
+import { createSessionToken, sessionToUser } from './_lib/session.js';
+import { categorizeAdvisory, priorityFromAdvisoryType, serializeVehicle, vehicleInclude } from './_lib/vehicles.js';
 
 function segments(request: VercelRequest) {
   const value = request.query.path;
-  return Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+  const raw = Array.isArray(value) ? value.join('/') : typeof value === 'string' ? value : '';
+  return raw.split('/').filter(Boolean).filter(part => part !== 'v1');
 }
 
 function routeKey(parts: string[]) {
@@ -523,6 +524,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   const parts = segments(request);
   const key = routeKey(parts);
 
+  if (key === '/') return response.status(200).json({ ok: true, service: 'vroova-api', version: 'v1' });
   if (key === '/health') return response.status(200).json({ status: 'healthy' });
   if (key === '/user') return response.status(200).json({ id: 'test-user', email: 'test@vroova.com' });
   if (key === '/auth') return request.method === 'POST' ? response.status(200).json({ success: true }) : sendMethodNotAllowed(response, ['POST']);
@@ -541,3 +543,4 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   sendError(response, 404, 'Route not found.');
 }
+
