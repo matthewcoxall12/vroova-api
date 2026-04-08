@@ -370,10 +370,13 @@ async function handleJobs(request: VercelRequest, response: VercelResponse, part
         title: getOptionalString(body, 'title') ?? undefined,
         description: getOptionalString(body, 'description') ?? undefined,
         category: getOptionalString(body, 'category') ?? undefined,
+        priority: validPriority(body.priority) ?? undefined,
         dueDate: body.dueDate === undefined ? undefined : parseDate(body.dueDate),
         estimatedCost: body.estimatedCost === undefined ? undefined : getOptionalNumber(body, 'estimatedCost'),
+        actualCost: body.actualCost === undefined ? undefined : getOptionalNumber(body, 'actualCost'),
+        completionNotes: getOptionalString(body, 'completionNotes') ?? undefined,
         status: status ?? undefined,
-        completedAt: status === 'COMPLETED' ? new Date() : undefined,
+        completedAt: status === 'COMPLETED' ? parseDate(body.completedAt) ?? new Date() : status ? null : undefined,
       },
     });
     response.status(200).json(updated);
