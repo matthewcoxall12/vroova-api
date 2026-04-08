@@ -46,8 +46,8 @@ DVSA_CLIENT_SECRET
 DVSA_API_KEY
 DVSA_SCOPE_URL
 DVSA_TOKEN_URL
-DATABASE_URL
-DIRECT_URL
+POSTGRES_PRISMA_URL
+POSTGRES_URL_NON_POOLING
 ```
 
 Do not store real secrets in this repository.
@@ -58,9 +58,9 @@ Do not store real secrets in this repository.
 
 `GOOGLE_PLAY_SUBSCRIPTION_PRODUCT_ID` should be `vroova_pro_monthly`.
 
-`DATABASE_URL` must point to the production PostgreSQL connection used by the app at runtime.
+`POSTGRES_PRISMA_URL` must point to the pooled Supabase PostgreSQL connection used by the app at runtime.
 
-`DIRECT_URL` should point to the direct Supabase PostgreSQL connection used by Prisma migrations.
+`POSTGRES_URL_NON_POOLING` should point to the non-pooled Supabase PostgreSQL connection used by Prisma migrations.
 
 The Vercel build runs the migration automatically:
 
