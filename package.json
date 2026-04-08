@@ -11,5 +11,8 @@
     "@vercel/node": "^5.3.24",
     "typescript": "^5.9.3",
     "vercel": "^48.6.0"
+  },
+  "dependencies": {
+    "google-auth-library": "^10.6.2"
   }
 }
