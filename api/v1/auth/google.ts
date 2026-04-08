@@ -19,6 +19,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
     response.status(500).json({ error: 'Google sign-in is not configured.' });
     return;
   }
+  const sessionSecret = process.env.VROOVA_JWT_SECRET ?? process.env.JWT_SECRET;
+  if (!sessionSecret || sessionSecret.length < 32) {
+    response.status(500).json({ error: 'Vroova session signing is not configured.' });
+    return;
+  }
 
   try {
     const body = getBody(request);
