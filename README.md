@@ -62,11 +62,13 @@ Do not store real secrets in this repository.
 
 `POSTGRES_URL_NON_POOLING` should point to the non-pooled Supabase PostgreSQL connection used by Prisma migrations.
 
-The Vercel build runs the migration automatically:
+Vercel install runs Prisma generate and migrations automatically:
 
 ```text
-npm run db:migrate && npm run typecheck
+node scripts/postinstall.mjs
 ```
+
+The script runs `prisma migrate deploy` only when `POSTGRES_PRISMA_URL` and `POSTGRES_URL_NON_POOLING` exist.
 
 If you need to run the migration manually from a shell that already has the Vercel/Supabase env vars available:
 
