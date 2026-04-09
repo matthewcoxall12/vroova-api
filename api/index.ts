@@ -109,6 +109,39 @@ async function buildVehicleLookupSnapshot(registration: string) {
   }
 }
 
+function vehicleSnapshotUpdateData(snapshot: Awaited<ReturnType<typeof buildVehicleLookupSnapshot>>) {
+  return {
+    make: getOptionalString(snapshot, 'make') ?? undefined,
+    model: getOptionalString(snapshot, 'model'),
+    colour: getOptionalString(snapshot, 'colour'),
+    fuelType: getOptionalString(snapshot, 'fuelType'),
+    yearOfManufacture: getOptionalNumber(snapshot, 'yearOfManufacture'),
+    engineCapacity: getOptionalNumber(snapshot, 'engineCapacity'),
+    co2Emissions: getOptionalNumber(snapshot, 'co2Emissions'),
+    taxStatus: getOptionalString(snapshot, 'taxStatus'),
+    taxDueDate: parseDate(snapshot.taxDueDate),
+    motStatus: getOptionalString(snapshot, 'motStatus'),
+    motExpiryDate: parseDate(snapshot.motExpiryDate),
+    currentMileage: getOptionalNumber(snapshot, 'lastMileage'),
+    motHistoryCache: Array.isArray(snapshot.motHistory) ? (snapshot.motHistory as Prisma.JsonArray) : Prisma.JsonNull,
+    motHistoryCount: getOptionalNumber(snapshot, 'motHistoryCount'),
+    advisoryCount: getOptionalNumber(snapshot, 'advisoryCount'),
+    recentAdvisories: Array.isArray(snapshot.recentAdvisories) ? (snapshot.recentAdvisories as Prisma.JsonArray) : Prisma.JsonNull,
+    lastTestResult: getOptionalString(snapshot, 'lastTestResult'),
+    lastTestDate: parseDate(snapshot.lastTestDate),
+    lastMileage: getOptionalNumber(snapshot, 'lastMileage'),
+    lastMileageUnit: getOptionalString(snapshot, 'lastMileageUnit'),
+    dvsaAvailable: typeof snapshot.dvsaAvailable === 'boolean' ? snapshot.dvsaAvailable : false,
+    motHistoryUnavailableReason: getOptionalString(snapshot, 'motHistoryUnavailableReason'),
+    dvlaLastRefreshedAt: new Date(),
+    dvsaLastRefreshedAt: new Date(),
+  };
+}
+
+function cachedMotHistoryForVehicle(vehicle: { motHistoryCache?: Prisma.JsonValue | null }) {
+  return Array.isArray(vehicle.motHistoryCache) ? vehicle.motHistoryCache : [];
+}
+
 async function handleGoogleAuth(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
 
@@ -255,6 +288,18 @@ async function handleVehicles(request: VercelRequest, response: VercelResponse, 
             taxStatus: getOptionalString(body, 'taxStatus'),
             taxDueDate: parseDate(body.taxDueDate),
             currentMileage: getOptionalNumber(body, 'currentMileage'),
+            motHistoryCache: Array.isArray(body.motHistory) ? body.motHistory : undefined,
+            motHistoryCount: getOptionalNumber(body, 'motHistoryCount'),
+            advisoryCount: getOptionalNumber(body, 'advisoryCount'),
+            recentAdvisories: Array.isArray(body.recentAdvisories) ? body.recentAdvisories : undefined,
+            lastTestResult: getOptionalString(body, 'lastTestResult'),
+            lastTestDate: parseDate(body.lastTestDate),
+            lastMileage: getOptionalNumber(body, 'lastMileage'),
+            lastMileageUnit: getOptionalString(body, 'lastMileageUnit'),
+            dvsaAvailable: typeof body.dvsaAvailable === 'boolean' ? body.dvsaAvailable : undefined,
+            motHistoryUnavailableReason: getOptionalString(body, 'motHistoryUnavailableReason'),
+            dvlaLastRefreshedAt: new Date(),
+            dvsaLastRefreshedAt: Array.isArray(body.motHistory) ? new Date() : undefined,
           },
           include: vehicleInclude,
         });
@@ -302,22 +347,10 @@ async function handleVehicles(request: VercelRequest, response: VercelResponse, 
   if (parts[2] === 'refresh' && parts.length === 3) {
     if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
     try {
-      const dvla = await lookupDvlaVehicle(vehicle.registration);
+      const snapshot = await buildVehicleLookupSnapshot(vehicle.registration);
       const updated = await prisma.vehicle.update({
         where: { id: vehicleId },
-        data: {
-          make: dvla.make,
-          colour: dvla.colour,
-          fuelType: dvla.fuelType,
-          yearOfManufacture: dvla.yearOfManufacture,
-          engineCapacity: dvla.engineCapacity,
-          co2Emissions: dvla.co2Emissions,
-          taxStatus: dvla.taxStatus,
-          taxDueDate: dvla.taxDueDate ? new Date(dvla.taxDueDate) : null,
-          motStatus: dvla.motStatus,
-          motExpiryDate: dvla.motExpiryDate ? new Date(dvla.motExpiryDate) : null,
-          dvlaLastRefreshedAt: new Date(),
-        },
+        data: vehicleSnapshotUpdateData(snapshot),
         include: vehicleInclude,
       });
       response.status(200).json(serializeVehicle(updated));
@@ -331,7 +364,36 @@ async function handleVehicles(request: VercelRequest, response: VercelResponse, 
   if (parts[2] === 'mot-history' && parts.length === 3) {
     if (request.method !== 'GET') return sendMethodNotAllowed(response, ['GET']);
     try {
-      response.status(200).json(await fetchMotHistory(vehicle.registration));
+      const hasFreshCache =
+        !!vehicle.dvsaLastRefreshedAt && Date.now() - new Date(vehicle.dvsaLastRefreshedAt).getTime() < 7 * 24 * 60 * 60 * 1000;
+      if (hasFreshCache && Array.isArray(vehicle.motHistoryCache)) {
+        response.status(200).json({
+          motHistory: cachedMotHistoryForVehicle(vehicle),
+          cached: true,
+          refreshedAt: vehicle.dvsaLastRefreshedAt,
+        });
+        return;
+      }
+
+      if (Array.isArray(vehicle.motHistoryCache) && vehicle.motHistoryCache.length > 0) {
+        response.status(200).json({
+          motHistory: cachedMotHistoryForVehicle(vehicle),
+          cached: true,
+          refreshedAt: vehicle.dvsaLastRefreshedAt,
+        });
+        return;
+      }
+
+      const snapshot = await buildVehicleLookupSnapshot(vehicle.registration);
+      await prisma.vehicle.update({
+        where: { id: vehicleId },
+        data: vehicleSnapshotUpdateData(snapshot),
+      });
+      response.status(200).json({
+        motHistory: Array.isArray(snapshot.motHistory) ? snapshot.motHistory : [],
+        cached: false,
+        refreshedAt: new Date(),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'MOT history request failed.';
       sendError(response, message.includes('not configured') ? 503 : 502, message);
@@ -489,57 +551,98 @@ async function ensureOwnedVehicle(userId: string, vehicleId: string) {
   return prisma.vehicle.findFirst({ where: { id: vehicleId, userId, isActive: true } });
 }
 
-async function handleMileage(request: VercelRequest, response: VercelResponse) {
+async function handleMileage(request: VercelRequest, response: VercelResponse, parts: string[]) {
   const context = await getRequestUser(request, response);
   if (!context) return;
-  if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
-  const body = readJsonBody(request);
-  const vehicleId = getOptionalString(body, 'vehicleId');
-  const mileage = getOptionalNumber(body, 'mileage');
-  if (!vehicleId || !mileage) return sendError(response, 400, 'vehicleId and mileage are required.');
-  if (!(await ensureOwnedVehicle(context.user.id, vehicleId))) return sendError(response, 404, 'Vehicle not found.');
-  const log = await prisma.mileageLog.create({ data: { vehicleId, userId: context.user.id, mileage, recordedAt: parseDate(body.recordedAt) ?? new Date(), notes: getOptionalString(body, 'notes') } });
-  await prisma.vehicle.update({ where: { id: vehicleId }, data: { currentMileage: mileage } });
-  response.status(201).json(log);
+  if (parts.length === 1) {
+    if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
+    const body = readJsonBody(request);
+    const vehicleId = getOptionalString(body, 'vehicleId');
+    const mileage = getOptionalNumber(body, 'mileage');
+    if (!vehicleId || !mileage) return sendError(response, 400, 'vehicleId and mileage are required.');
+    if (!(await ensureOwnedVehicle(context.user.id, vehicleId))) return sendError(response, 404, 'Vehicle not found.');
+    const log = await prisma.mileageLog.create({ data: { vehicleId, userId: context.user.id, mileage, recordedAt: parseDate(body.recordedAt) ?? new Date(), notes: getOptionalString(body, 'notes') } });
+    await prisma.vehicle.update({ where: { id: vehicleId }, data: { currentMileage: mileage } });
+    response.status(201).json(log);
+    return;
+  }
+
+  const id = parts[1];
+  const log = await prisma.mileageLog.findFirst({ where: { id, userId: context.user.id } });
+  if (!log) return sendError(response, 404, 'Mileage log not found.');
+  if (request.method === 'DELETE') {
+    await prisma.mileageLog.delete({ where: { id } });
+    const latest = await prisma.mileageLog.findFirst({ where: { vehicleId: log.vehicleId, userId: context.user.id }, orderBy: { recordedAt: 'desc' } });
+    await prisma.vehicle.update({ where: { id: log.vehicleId }, data: { currentMileage: latest?.mileage ?? null } });
+    response.status(200).json({ success: true });
+    return;
+  }
+  sendMethodNotAllowed(response, ['POST', 'DELETE']);
 }
 
-async function handleInsurance(request: VercelRequest, response: VercelResponse) {
+async function handleInsurance(request: VercelRequest, response: VercelResponse, parts: string[]) {
   const context = await getRequestUser(request, response);
   if (!context) return;
-  if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
-  const body = readJsonBody(request);
-  const vehicleId = getOptionalString(body, 'vehicleId');
-  const provider = getOptionalString(body, 'provider');
-  const renewalDate = parseDate(body.renewalDate);
-  if (!vehicleId || !provider || !renewalDate) return sendError(response, 400, 'vehicleId, provider and renewalDate are required.');
-  if (!(await ensureOwnedVehicle(context.user.id, vehicleId))) return sendError(response, 404, 'Vehicle not found.');
-  const policy = await prisma.insurancePolicy.create({ data: { vehicleId, userId: context.user.id, provider, renewalDate, policyNumber: getOptionalString(body, 'policyNumber'), notes: getOptionalString(body, 'notes') } });
-  response.status(201).json(policy);
+  if (parts.length === 1) {
+    if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
+    const body = readJsonBody(request);
+    const vehicleId = getOptionalString(body, 'vehicleId');
+    const provider = getOptionalString(body, 'provider');
+    const renewalDate = parseDate(body.renewalDate);
+    if (!vehicleId || !provider || !renewalDate) return sendError(response, 400, 'vehicleId, provider and renewalDate are required.');
+    if (!(await ensureOwnedVehicle(context.user.id, vehicleId))) return sendError(response, 404, 'Vehicle not found.');
+    const policy = await prisma.insurancePolicy.create({ data: { vehicleId, userId: context.user.id, provider, renewalDate, policyNumber: getOptionalString(body, 'policyNumber'), notes: getOptionalString(body, 'notes') } });
+    response.status(201).json(policy);
+    return;
+  }
+
+  const id = parts[1];
+  const policy = await prisma.insurancePolicy.findFirst({ where: { id, userId: context.user.id } });
+  if (!policy) return sendError(response, 404, 'Insurance policy not found.');
+  if (request.method === 'DELETE') {
+    await prisma.insurancePolicy.delete({ where: { id } });
+    response.status(200).json({ success: true });
+    return;
+  }
+  sendMethodNotAllowed(response, ['POST', 'DELETE']);
 }
 
-async function handleRecords(request: VercelRequest, response: VercelResponse) {
+async function handleRecords(request: VercelRequest, response: VercelResponse, parts: string[]) {
   const context = await getRequestUser(request, response);
   if (!context) return;
-  if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
-  const body = readJsonBody(request);
-  const vehicleId = getOptionalString(body, 'vehicleId');
-  const title = getOptionalString(body, 'title') ?? getOptionalString(body, 'provider') ?? 'Service record';
-  if (!vehicleId || !title) return sendError(response, 400, 'vehicleId and title are required.');
-  if (!(await ensureOwnedVehicle(context.user.id, vehicleId))) return sendError(response, 404, 'Vehicle not found.');
-  const record = await prisma.serviceRecord.create({
-    data: {
-      vehicleId,
-      userId: context.user.id,
-      title,
-      description: getOptionalString(body, 'description'),
-      provider: getOptionalString(body, 'provider'),
-      recordDate: parseDate(body.recordDate) ?? new Date(),
-      mileage: getOptionalNumber(body, 'mileage'),
-      cost: getOptionalNumber(body, 'cost'),
-      recordType: getOptionalString(body, 'recordType') ?? 'service',
-    },
-  });
-  response.status(201).json(record);
+  if (parts.length === 1) {
+    if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
+    const body = readJsonBody(request);
+    const vehicleId = getOptionalString(body, 'vehicleId');
+    const title = getOptionalString(body, 'title') ?? getOptionalString(body, 'provider') ?? 'Service record';
+    if (!vehicleId || !title) return sendError(response, 400, 'vehicleId and title are required.');
+    if (!(await ensureOwnedVehicle(context.user.id, vehicleId))) return sendError(response, 404, 'Vehicle not found.');
+    const record = await prisma.serviceRecord.create({
+      data: {
+        vehicleId,
+        userId: context.user.id,
+        title,
+        description: getOptionalString(body, 'description'),
+        provider: getOptionalString(body, 'provider'),
+        recordDate: parseDate(body.recordDate) ?? new Date(),
+        mileage: getOptionalNumber(body, 'mileage'),
+        cost: getOptionalNumber(body, 'cost'),
+        recordType: getOptionalString(body, 'recordType') ?? 'service',
+      },
+    });
+    response.status(201).json(record);
+    return;
+  }
+
+  const id = parts[1];
+  const record = await prisma.serviceRecord.findFirst({ where: { id, userId: context.user.id } });
+  if (!record) return sendError(response, 404, 'Service record not found.');
+  if (request.method === 'DELETE') {
+    await prisma.serviceRecord.delete({ where: { id } });
+    response.status(200).json({ success: true });
+    return;
+  }
+  sendMethodNotAllowed(response, ['POST', 'DELETE']);
 }
 
 async function handleMe(request: VercelRequest, response: VercelResponse) {
@@ -640,9 +743,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
   if (parts[0] === 'vehicles') return handleVehicles(request, response, parts);
   if (parts[0] === 'jobs') return handleJobs(request, response, parts);
   if (parts[0] === 'reminders') return handleReminders(request, response, parts);
-  if (key === '/mileage') return handleMileage(request, response);
-  if (key === '/insurance') return handleInsurance(request, response);
-  if (key === '/records' || key === '/service-records') return handleRecords(request, response);
+  if (parts[0] === 'mileage') return handleMileage(request, response, parts);
+  if (parts[0] === 'insurance') return handleInsurance(request, response, parts);
+  if (parts[0] === 'records' || parts[0] === 'service-records') return handleRecords(request, response, parts);
   if (key === '/documents') return sendError(response, 501, 'Documents are stored locally on the Android phone in this app version.');
   if (key === '/subscriptions/google-play/refresh') return handleSubscriptionRefresh(request, response);
   if (key === '/subscriptions/google-play/verify') return handleSubscriptionVerify(request, response);

@@ -84,11 +84,22 @@ model Vehicle {
   taxDueDate              DateTime?
   motStatus               String?
   motExpiryDate           DateTime?
+  motHistoryCache         Json?
+  motHistoryCount         Int?
+  advisoryCount           Int?
+  recentAdvisories        Json?
+  lastTestResult          String?
+  lastTestDate            DateTime?
+  lastMileage             Int?
+  lastMileageUnit         String?
+  dvsaAvailable           Boolean   @default(false)
+  motHistoryUnavailableReason String?
   dateOfFirstRegistration DateTime?
   currentMileage          Int?
   imageUrl                String?
   isActive                Boolean   @default(true)
   dvlaLastRefreshedAt     DateTime?
+  dvsaLastRefreshedAt     DateTime?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
