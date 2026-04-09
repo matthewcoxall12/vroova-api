@@ -70,6 +70,45 @@ function authResponseForUser(user: { id: string; email: string; fullName: string
   };
 }
 
+async function buildVehicleLookupSnapshot(registration: string) {
+  const dvla = await lookupDvlaVehicle(registration);
+
+  try {
+    const dvsa = await fetchMotHistory(registration);
+    const motHistory = Array.isArray(dvsa.motHistory) ? dvsa.motHistory : Array.isArray(dvsa.motTests) ? dvsa.motTests : [];
+    const advisories = Array.isArray(dvsa.advisories) ? dvsa.advisories : [];
+    const latestTest = motHistory[0];
+
+    return {
+      ...dvla,
+      motHistory,
+      motHistoryCount: motHistory.length,
+      advisoryCount: advisories.length,
+      recentAdvisories: advisories.slice(0, 5),
+      lastTestResult: latestTest?.testResult ?? null,
+      lastTestDate: latestTest?.completedDate ?? null,
+      lastMileage: latestTest?.odometerValue ?? null,
+      lastMileageUnit: latestTest?.odometerUnit ?? null,
+      dvsaAvailable: true,
+      motHistoryUnavailableReason: null,
+    };
+  } catch (error) {
+    return {
+      ...dvla,
+      motHistory: [],
+      motHistoryCount: 0,
+      advisoryCount: 0,
+      recentAdvisories: [],
+      lastTestResult: null,
+      lastTestDate: null,
+      lastMileage: null,
+      lastMileageUnit: null,
+      dvsaAvailable: false,
+      motHistoryUnavailableReason: error instanceof Error ? error.message : 'MOT history unavailable.',
+    };
+  }
+}
+
 async function handleGoogleAuth(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
 
@@ -157,7 +196,7 @@ async function handlePublicVehicleCheck(request: VercelRequest, response: Vercel
   try {
     const body = readJsonBody(request);
     const registration = typeof body.registration === 'string' ? body.registration : '';
-    response.status(200).json({ vehicle: await lookupDvlaVehicle(registration) });
+    response.status(200).json({ vehicle: await buildVehicleLookupSnapshot(registration) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Vehicle lookup failed.';
     sendError(response, message.includes('not configured') ? 503 : 400, message);
@@ -234,7 +273,7 @@ async function handleVehicles(request: VercelRequest, response: VercelResponse, 
     if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
     try {
       const body = readJsonBody(request);
-      response.status(200).json({ vehicle: await lookupDvlaVehicle(typeof body.registration === 'string' ? body.registration : '') });
+      response.status(200).json({ vehicle: await buildVehicleLookupSnapshot(typeof body.registration === 'string' ? body.registration : '') });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not lookup vehicle.';
       sendError(response, message.includes('not configured') ? 503 : 400, message);
