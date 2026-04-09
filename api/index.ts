@@ -147,11 +147,13 @@ async function handleCron(request: VercelRequest, response: VercelResponse, part
   if (parts[1] !== 'refresh-vehicle-snapshots') return sendError(response, 404, 'Cron route not found.');
 
   const expectedSecret = process.env.CRON_SECRET;
-  if (expectedSecret) {
-    const authorization = request.headers.authorization;
-    if (authorization !== `Bearer ${expectedSecret}`) {
-      return sendError(response, 401, 'Unauthorized.');
-    }
+  if (!expectedSecret) {
+    return sendError(response, 503, 'CRON_SECRET is not configured.');
+  }
+
+  const authorization = request.headers.authorization;
+  if (authorization !== `Bearer ${expectedSecret}`) {
+    return sendError(response, 401, 'Unauthorized.');
   }
 
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -628,8 +630,11 @@ async function handleMileage(request: VercelRequest, response: VercelResponse, p
   if (!log) return sendError(response, 404, 'Mileage log not found.');
   if (request.method === 'DELETE') {
     await prisma.mileageLog.delete({ where: { id } });
-    const latest = await prisma.mileageLog.findFirst({ where: { vehicleId: log.vehicleId, userId: context.user.id }, orderBy: { recordedAt: 'desc' } });
-    await prisma.vehicle.update({ where: { id: log.vehicleId }, data: { currentMileage: latest?.mileage ?? null } });
+    const [latest, vehicle] = await Promise.all([
+      prisma.mileageLog.findFirst({ where: { vehicleId: log.vehicleId, userId: context.user.id }, orderBy: { recordedAt: 'desc' } }),
+      prisma.vehicle.findFirst({ where: { id: log.vehicleId, userId: context.user.id }, select: { lastMileage: true } }),
+    ]);
+    await prisma.vehicle.update({ where: { id: log.vehicleId }, data: { currentMileage: latest?.mileage ?? vehicle?.lastMileage ?? null } });
     response.status(200).json({ success: true });
     return;
   }
