@@ -142,6 +142,62 @@ function cachedMotHistoryForVehicle(vehicle: { motHistoryCache?: Prisma.JsonValu
   return Array.isArray(vehicle.motHistoryCache) ? vehicle.motHistoryCache : [];
 }
 
+async function handleCron(request: VercelRequest, response: VercelResponse, parts: string[]) {
+  if (request.method !== 'GET') return sendMethodNotAllowed(response, ['GET']);
+  if (parts[1] !== 'refresh-vehicle-snapshots') return sendError(response, 404, 'Cron route not found.');
+
+  const expectedSecret = process.env.CRON_SECRET;
+  if (expectedSecret) {
+    const authorization = request.headers.authorization;
+    if (authorization !== `Bearer ${expectedSecret}`) {
+      return sendError(response, 401, 'Unauthorized.');
+    }
+  }
+
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const staleVehicles = await prisma.vehicle.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { dvlaLastRefreshedAt: null },
+        { dvlaLastRefreshedAt: { lt: cutoff } },
+        { dvsaLastRefreshedAt: null },
+        { dvsaLastRefreshedAt: { lt: cutoff } },
+      ],
+    },
+    orderBy: { updatedAt: 'asc' },
+    take: 25,
+  });
+
+  let refreshed = 0;
+  const failures: Array<{vehicleId: string; registration: string; error: string}> = [];
+
+  for (const vehicle of staleVehicles) {
+    try {
+      const snapshot = await buildVehicleLookupSnapshot(vehicle.registration);
+      await prisma.vehicle.update({
+        where: { id: vehicle.id },
+        data: vehicleSnapshotUpdateData(snapshot),
+      });
+      refreshed += 1;
+    } catch (error) {
+      failures.push({
+        vehicleId: vehicle.id,
+        registration: vehicle.registration,
+        error: error instanceof Error ? error.message : 'Unknown refresh error',
+      });
+    }
+  }
+
+  response.status(200).json({
+    success: true,
+    scanned: staleVehicles.length,
+    refreshed,
+    failed: failures.length,
+    failures,
+  });
+}
+
 async function handleGoogleAuth(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') return sendMethodNotAllowed(response, ['POST']);
 
@@ -734,6 +790,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
 
   if (key === '/') return response.status(200).json({ ok: true, service: 'vroova-api', version: 'v1' });
   if (key === '/health') return response.status(200).json({ status: 'healthy' });
+  if (parts[0] === 'cron') return handleCron(request, response, parts);
   if (key === '/user') return response.status(200).json({ id: 'test-user', email: 'test@vroova.com' });
   if (key === '/auth') return request.method === 'POST' ? response.status(200).json({ success: true }) : sendMethodNotAllowed(response, ['POST']);
   if (key === '/auth/google') return handleGoogleAuth(request, response);

@@ -7,6 +7,16 @@
     {
       "source": "/v1/:path*",
       "destination": "/api?path=:path*"
+    },
+    {
+      "source": "/cron/:path*",
+      "destination": "/api?path=cron/:path*"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/cron/refresh-vehicle-snapshots",
+      "schedule": "0 5 * * *"
     }
   ]
 }
